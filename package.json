@@ -1,0 +1,27 @@
+{
+  "name": "amazon-interactive-slack-app-starter-kit",
+  "version": "0.1.0",
+  "bin": {
+    "amazon-interactive-slack-app-starter-kit": "bin/amazon-interactive-slack-app-starter-kit.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "cdk": "cdk"
+  },
+  "devDependencies": {
+    "@types/axios": "^0.14.0",
+    "@types/node": "10.17.27",
+    "@types/tsscmp": "^1.0.0",
+    "aws-cdk": "2.19.0",
+    "ts-node": "^9.0.0",
+    "typescript": "~3.9.7"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "2.19.0",
+    "axios": "^0.26.1",
+    "constructs": "^10.0.0",
+    "source-map-support": "^0.5.16",
+    "tsscmp": "^1.0.6"
+  }
+}
