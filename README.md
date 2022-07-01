@@ -1,10 +1,9 @@
 ## Amazon Interactive Slack App Starter Kit
 
-This starter kit will help you started with buildig an interactive Slack app leveraging CDK.
+This starter kit will help you started with building an interactive Slack app leveraging CDK.
 
 ## TODO
-1. Remove AWS logo from architecture diagram?
-1. Refactor to use Slack API
+1. Refactor to use Slack Bolt SDK
 1. Reference future blog post
 1. Include deployment instructions
 1. Cleanup README & enhance description
