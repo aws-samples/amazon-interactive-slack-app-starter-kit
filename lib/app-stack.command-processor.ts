@@ -16,17 +16,18 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import { createHmac } from 'crypto';
-import * as axios from 'axios';
+import { App, AwsLambdaReceiver, LogLevel, RespondFn, SayFn } from "@slack/bolt"
+const AWS = require('aws-sdk')
 import { buildStatusBlocks, ServiceRequest } from '/opt/nodejs/utils';
-const tsscmp = require('tsscmp');
-const AWS = require('aws-sdk');
 
-AWS.config.update({region: 'us-east-1'});
-const secretsClient = new AWS.SecretsManager();
-const ssmClient = new AWS.SSM();
-const ddbClient = new AWS.DynamoDB.DocumentClient();
+AWS.config.update({ region: 'us-east-1' })
+const secretsClient = new AWS.SecretsManager()
+const ssmClient = new AWS.SSM()
+const ddbClient = new AWS.DynamoDB.DocumentClient()
 const lambdaClient = new AWS.Lambda();
+
+let awsLambdaReceiver: AwsLambdaReceiver | null = null
+let app: App | null = null
 
 type RequestDetails = {
   channelId: string
@@ -37,134 +38,141 @@ type RequestDetails = {
   inputValue?: string
 }
 
-exports.handler = async function(event: any, context: any) {
-  // Verify Slack Request
-  try {
-    await verifySlackRequest(event)
-  } catch (error: any) {
-    console.error('Slack verification error', error)
-    return generateResponse('Slack verification failure: ' + error);
+exports.handler = async (event: any, context: any, callback: any) => {
+  if (!awsLambdaReceiver) {
+    await initBolt()
+    configureApp()
   }
-
-  // Convert body to a consistent format
-  const requestDetails = parseRequest(event)
-
-  // Verify Channel
-  try {
-    await verifySlackChannel(requestDetails.channelId);
-  } catch (error: any) {
-    console.error('Slack channel verification error', error);
-    return generateResponse('You are not authorized to use this command here');
-  }
-
-  // Verify User
-  try {
-    requestDetails.permittedActions = await verifySlackUser(requestDetails.userName);
-  } catch (error: any) {
-    console.error('Slack user verification error', error)
-    return generateResponse('You are not authorized to use this command here');
-  }
-
-  // Verify User can perform action
-  try {
-    verifyUserPermission(requestDetails)
-  } catch (error: any) {
-    console.error('Slack user permission error', error);
-    return generateResponse('You are not authorized to use this command here');
-  }
-
-  // Process command
-  try {
-    const response = await processCommand(requestDetails)
-    return generateResponse(JSON.stringify(response))
-  } catch (error: any) {
-    console.error('Failed to process command', error);
-    return generateResponse('Failed to process request. Please try again later');
-  }
+  const handler = await awsLambdaReceiver!.start()
+  return handler(event, context, callback)
 }
 
-function generateResponse(body: string) {
-  return {
-    statusCode: 200,
-    headers: {},
-    body: body
-  };
+async function initBolt() {
+  // Get the Slack Secrets
+  const secretResult = await secretsClient.getSecretValue({ SecretId: process.env.SLACK_SECRETS_NAME }).promise();
+  const secretObject = JSON.parse(secretResult.SecretString)
+
+  awsLambdaReceiver = new AwsLambdaReceiver({
+    signingSecret: secretObject.signingSecret
+  })
+
+  app = new App({
+    token: secretObject.botToken,
+    receiver: awsLambdaReceiver,
+    logLevel: LogLevel.DEBUG
+  })
 }
 
-function parseRequest(event: any): RequestDetails {
-  if (event.body.startsWith('payload')) { // Process payload requests
-    const bodyJson = queryStringToJSON(event.body);
-    const payloadJson = JSON.parse(bodyJson.payload)
-    console.log('payloadJson', JSON.stringify(payloadJson))
-    return {
-      channelId: payloadJson.channel.id,
-      userName: payloadJson.user.username,
-      permittedActions: [],
-      action: payloadJson.actions[0].value,
-      responseUrl: payloadJson.response_url,
-      inputValue: payloadJson.state.values.form_input ? payloadJson.state.values.form_input.input_value.value : undefined
+function configureApp() {
+  if (!app) {
+    throw Error('Bolt app not initialized while trying to configure it')
+  }
+
+  // @ts-ignore
+  app.use(async ({ context, body, ack, next, respond }) => {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    await ack!()
+
+    // Convert body to a consistent format
+    const requestDetails = parseRequest(body)
+
+    // Add the request details to the context object
+    context.requestDetails = requestDetails
+
+    console.log('middleware context', JSON.stringify(context))
+
+    // Verify Channel
+    try {
+      await verifySlackChannel(requestDetails.channelId)
+    } catch (error: any) {
+      console.error('Slack channel verification error', error)
+      await respond({ text: 'You are not authorized to use this command here', response_type: 'ephemeral' })
+      return
     }
-  } else { // Process statndard requests
-    const bodyJson = queryStringToJSON(event.body)
+
+    // Verify User
+    try {
+      requestDetails.permittedActions = await verifySlackUser(requestDetails.userName)
+    } catch (error: any) {
+      console.error('Slack user verification error', error)
+      await respond({ text: 'You are not authorized to use this command here', response_type: 'ephemeral' })
+      return
+    }
+
+    // Verify User can perform action
+    try {
+      verifyUserPermission(requestDetails)
+    } catch (error: any) {
+      console.error('Slack user permission error', error)
+      await respond({ text: 'You are not authorized to use this command here', response_type: 'ephemeral' })
+      return
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    await next!()
+  })
+
+  app.command('/my-slack-bot', async ({ respond }) => {
+    await respond(buildWelcomeBlocks())
+  })
+
+  app.action('sample-lambda', async ({ body, context, respond }) => {
+    console.log('body', body)
+    console.log('context', context)
+
+    await respond({
+      blocks: buildFormBlocks('Sample Lambda', context.requestDetails.action),
+      replace_original: true
+    })
+  })
+
+  app.action('sample-lambda/submit', async ({ body, context, respond, say }) => {
+    console.log('body', body)
+    console.log('context', context)
+
+    await handleActionSubmit(context.requestDetails, 'Sample Lambda', respond, say)
+  })
+
+  app.action('sample-sfn', async ({ body, context, respond }) => {
+    console.log('body', body)
+    console.log('context', context)
+
+    await respond({
+      blocks: buildFormBlocks('Sample State Machine', context.requestDetails.action),
+      replace_original: true
+    })
+  })
+
+  app.action('sample-sfn/submit', async ({ body, context, respond, say }) => {
+    console.log('body', body)
+    console.log('context', context)
+
+    await handleActionSubmit(context.requestDetails, 'Sample State Machine', respond, say)
+  })
+}
+
+function parseRequest(body: any): RequestDetails {
+  console.log('body', body)
+  if (body.user_id) {
     return {
-      channelId: bodyJson.channel_id,
-      userName: bodyJson.user_name,
+      channelId: body.channel_id,
+      userName: body.user_name,
       permittedActions: [],
       action: 'welcome'
     }
-  }
-}
-
-function queryStringToJSON(queryString: string) {
-  var result: any = {};
-  queryString.split('&').forEach(function(pair: string) {
-      const pairList = pair.split('=');
-      result[pairList[0]] = decodeURIComponent(pairList[1] || '');
-  });
-  return JSON.parse(JSON.stringify(result));
-}
-
-// Pulled from https://github.com/slackapi/bolt-js/blob/main/src/receivers/verify-request.ts
-async function verifySlackRequest(event: any) {
-  const requestTimestampSec = event.headers['X-Slack-Request-Timestamp'];
-  const signature = event.headers['X-Slack-Signature'];
-  if (Number.isNaN(requestTimestampSec)) {
-    throw new Error(
-      `Header X-Slack-Request-Timestamp did not have the expected type (${requestTimestampSec})`,
-    );
-  }
-
-  // Calculate time-dependent values
-  const nowMs = Date.now();
-  const fiveMinutesAgoSec = Math.floor(nowMs / 1000) - 60 * 5;
-
-  // Enforce verification rules
-
-  // Rule 1: Check staleness
-  if (requestTimestampSec < fiveMinutesAgoSec) {
-    throw new Error('Stale request');
-  }
-
-  // Rule 2: Check signature
-  // Separate parts of signature
-  const [signatureVersion, signatureHash] = signature.split('=');
-  // Only handle known versions
-  if (signatureVersion !== 'v0') {
-    throw new Error('Unknown signature version');
-  }
-  // Get the Slack Signing Secret
-  const secretResult = await secretsClient.getSecretValue({SecretId: process.env.SIGNING_SECRET_NAME}).promise();
-  // Compute our own signature hash
-  const hmac = createHmac('sha256', secretResult.SecretString);
-  hmac.update(`${signatureVersion}:${requestTimestampSec}:${event.body}`);
-  const ourSignatureHash = hmac.digest('hex');
-  if (!signatureHash || !tsscmp(signatureHash, ourSignatureHash)) {
-    throw new Error('Signature mismatch');
+  } else {
+    return {
+      channelId: body.channel.id,
+      userName: body.user.username,
+      permittedActions: [],
+      action: body.actions[0].action_id,
+      responseUrl: body.response_url
+    }
   }
 }
 
 async function verifySlackChannel(requestChannelId: string) {
-  const channelIdParameter = await ssmClient.getParameter({Name: process.env.CHANNEL_ID_NAME}).promise();
+  const channelIdParameter = await ssmClient.getParameter({ Name: process.env.CHANNEL_ID_NAME }).promise()
   if (channelIdParameter.Parameter.Value !== requestChannelId) {
     throw new Error('Invalid channel')
   }
@@ -173,21 +181,21 @@ async function verifySlackChannel(requestChannelId: string) {
 async function verifySlackUser(userName: string): Promise<string[]> {
   // Find record in table
   const params = {
-    TableName : process.env.BOT_USERS_TABLE_NAME,
+    TableName: process.env.BOT_USERS_TABLE_NAME,
     KeyConditionExpression: '#name = :name',
-    ExpressionAttributeNames:{
-        '#name': 'slackUserName'
+    ExpressionAttributeNames: {
+      '#name': 'slackUserName'
     },
     ExpressionAttributeValues: {
-        ':name': userName
+      ':name': userName
     }
-  };
-  const response = await ddbClient.query(params).promise();
+  }
+  const response = await ddbClient.query(params).promise()
   if (response.Count === 0) {
     throw new Error('User not found')
   }
   const user = response.Items[0]
-  console.log('user', JSON.stringify(user));
+  console.log('user', JSON.stringify(user))
 
   return user.permittedActions
 }
@@ -195,39 +203,11 @@ async function verifySlackUser(userName: string): Promise<string[]> {
 function verifyUserPermission(requestDetails: RequestDetails) {
   for (var permittedAction of requestDetails.permittedActions) {
     if (requestDetails.action === 'welcome' || requestDetails.action.startsWith(permittedAction)) {
-      return;
+      return
     }
   }
 
   throw new Error('User not permitted to perform action')
-}
-
-async function processCommand(requestDetails: RequestDetails): Promise<any> {
-  console.log('processCommand', JSON.stringify(requestDetails))
-
-  if (requestDetails.action === 'welcome') {
-    return buildWelcomeBlocks();
-  } else if (requestDetails.action === 'sample-lambda') {
-    // Update ephemeral message with simple form input
-    await axios.default.post(requestDetails.responseUrl!, {
-      replace_original: true,
-      blocks: buildFormBlocks('Sample Lambda', requestDetails.action)
-    });
-  } else if (requestDetails.action === 'sample-lambda/submit') {
-    await handleActionSubmit(requestDetails, 'Sample Lambda')
-  } else if (requestDetails.action === 'sample-sfn') {
-    // Update ephemeral message with simple form input
-    await axios.default.post(requestDetails.responseUrl!, {
-      replace_original: true,
-      blocks: buildFormBlocks('Sample State Machine', requestDetails.action)
-    });
-  } else if (requestDetails.action === 'sample-sfn/submit') {
-    await handleActionSubmit(requestDetails, 'Sample State Machine')
-  } else {
-    throw new Error('Unhandled action received')
-  }
-
-  return {}
 }
 
 function buildWelcomeBlocks() {
@@ -253,7 +233,7 @@ function buildWelcomeBlocks() {
               text: 'Sample Lambda',
               emoji: true
             },
-            value: 'sample-lambda'
+            action_id: 'sample-lambda'
           },
           {
             type: 'button',
@@ -262,56 +242,12 @@ function buildWelcomeBlocks() {
               text: 'Sample State Machine',
               emoji: true
             },
-            value: 'sample-sfn'
+            action_id: 'sample-sfn'
           }
         ]
       }
     ]
   }
-}
-
-async function handleActionSubmit(requestDetails: RequestDetails, title: string) {
-  // Create header
-  const headerBlocks = buildHeaderBlocks(title, requestDetails.userName);
-
-  // Add status
-  const statusBlocks = buildStatusBlocks('running');
-
-  // Get the Bot Token Secret
-  const secretResult = await secretsClient.getSecretValue({SecretId: process.env.BOT_TOKEN_NAME}).promise();
-
-  // Post message in Slack channel indicating request in progress
-  const response = await axios.default.post('https://slack.com/api/chat.postMessage', {
-    channel: requestDetails.channelId,
-    blocks: [].concat(...headerBlocks).concat(...statusBlocks)
-  }, {
-    headers: {
-      Authorization: `Bearer ${secretResult.SecretString}`
-    }
-  });
-  if (!response.data.ok) {
-    throw new Error('Failed to post message to Slack channel')
-  }
-
-  // Delete original message
-  await axios.default.post(requestDetails.responseUrl!, {
-    delete_original: true
-  });
-
-  // Build service request details for downstream services
-  const serviceRequest: ServiceRequest = {
-    action: requestDetails.action,
-    channelId: requestDetails.channelId,
-    messageTs: response.data.ts,
-    headerBlocks: headerBlocks,
-    inputValue: requestDetails.inputValue!
-  }
-
-  // Trigger service trigger with request details (including input)
-  await lambdaClient.invokeAsync({
-    FunctionName: process.env.SERVICE_TRIGGER_NAME,
-    InvokeArgs: JSON.stringify(serviceRequest)
-  }).promise();
 }
 
 function buildFormBlocks(title: string, action: string) {
@@ -348,6 +284,7 @@ function buildFormBlocks(title: string, action: string) {
       type: 'actions',
       elements: [
         {
+          action_id: `${action}/submit`,
           type: 'button',
           style: 'primary',
           text: {
@@ -383,4 +320,33 @@ function buildHeaderBlocks(title: string, userName: string): any[] {
       type: 'divider'
     },
   ]
+}
+
+async function handleActionSubmit(requestDetails: RequestDetails, title: string, respond: RespondFn, say: SayFn) {
+  // Create header
+  const headerBlocks = buildHeaderBlocks(title, requestDetails.userName);
+
+  // Add status
+  const statusBlocks = buildStatusBlocks('running');
+
+  // Remove the ephemeral message
+  await respond({ delete_original: true })
+
+  // Post a message to the channel indicating the action is processing
+  const response = await say({ blocks: [].concat(...headerBlocks).concat(...statusBlocks) })
+
+  // Build service request details for downstream services
+  const serviceRequest: ServiceRequest = {
+    action: requestDetails.action,
+    channelId: requestDetails.channelId,
+    messageTs: response.ts as string,
+    headerBlocks: headerBlocks,
+    inputValue: requestDetails.inputValue!
+  }
+
+  // Trigger service trigger with request details (including input)
+  await lambdaClient.invokeAsync({
+    FunctionName: process.env.SERVICE_TRIGGER_NAME,
+    InvokeArgs: JSON.stringify(serviceRequest)
+  }).promise();
 }

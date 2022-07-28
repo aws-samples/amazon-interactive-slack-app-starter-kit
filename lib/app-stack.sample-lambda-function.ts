@@ -16,7 +16,7 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-exports.handler = async function(event: any, context: any) {
+exports.handler = async function (event: any, context: any) {
   await new Promise((resolve) => {
     setTimeout(() => {
       resolve(true);

@@ -20,28 +20,30 @@ import { buildStatusBlocks, ServiceRequest } from "./shared/nodejs/utils";
 import * as axios from 'axios';
 const AWS = require('aws-sdk');
 
-AWS.config.update({region: 'us-east-1'});
+AWS.config.update({ region: 'us-east-1' });
 const secretsClient = new AWS.SecretsManager();
 const lambdaClient = new AWS.Lambda();
 const sfnClient = new AWS.StepFunctions();
 
-exports.handler = async function(serviceRequest: ServiceRequest, context: any) {
+exports.handler = async function (serviceRequest: ServiceRequest, context: any) {
   console.log('serviceRequest', JSON.stringify(serviceRequest));
 
   // Get the Bot Token Secret
-  const secretResult = await secretsClient.getSecretValue({SecretId: process.env.BOT_TOKEN_NAME}).promise();
+  const secretResult = await secretsClient.getSecretValue({ SecretId: process.env.SLACK_SECRETS_NAME }).promise();
+  const secretObject = JSON.parse(secretResult.SecretString)
+  const botToken = secretObject.botToken
 
   // Route action
   if (serviceRequest.action === 'sample-lambda/submit') {
     try {
       const result = await lambdaClient.invoke({
         FunctionName: process.env.SAMPLE_LAMBDA_NAME,
-        Payload: JSON.stringify({input: serviceRequest.inputValue})
+        Payload: JSON.stringify({ input: serviceRequest.inputValue })
       }).promise();
 
-      await handleServiceSuccess(result.Payload, serviceRequest, secretResult.SecretString);
+      await handleServiceSuccess(result.Payload, serviceRequest, botToken);
     } catch (error: any) {
-      await handleServiceError(error, serviceRequest, secretResult.SecretString)
+      await handleServiceError(error, serviceRequest, botToken)
     }
   } else if (serviceRequest.action === 'sample-sfn/submit') {
     try {
@@ -70,10 +72,10 @@ exports.handler = async function(serviceRequest: ServiceRequest, context: any) {
       if (execution.status !== 'SUCCEEDED') {
         throw new Error(execution.output);
       }
-      
-      await handleServiceSuccess(execution.output, serviceRequest, secretResult.SecretString)
+
+      await handleServiceSuccess(execution.output, serviceRequest, botToken)
     } catch (error: any) {
-      await handleServiceError(error, serviceRequest, secretResult.SecretString)
+      await handleServiceError(error, serviceRequest, botToken)
     }
   } else {
     throw new Error('Unhandled action received')

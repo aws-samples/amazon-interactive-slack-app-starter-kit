@@ -31,8 +31,7 @@ export class AppStack extends Stack {
     super(scope, id, props);
 
     // Secrets and Parameters
-    const signingSecret = new Secret(this, 'SlackSigningSecret');
-    const botTokenSecret = new Secret(this, 'SlackBotTokenSecret');
+    const slackSecrets = new Secret(this, 'SlackSecrets');
     const slackChannelParameter = new StringParameter(this, 'SlackChannelIdParameter', {
       parameterName: 'SlackChannelIdParameter',
       description: 'The permitted slack channel ID for Slack Bot requets',
@@ -45,7 +44,7 @@ export class AppStack extends Stack {
       readCapacity: 1,
       writeCapacity: 1,
       removalPolicy: RemovalPolicy.DESTROY,
-      partitionKey: {name: 'slackUserName', type: AttributeType.STRING}
+      partitionKey: { name: 'slackUserName', type: AttributeType.STRING }
     });
 
     // Step Functions
@@ -70,30 +69,28 @@ export class AppStack extends Stack {
 
     const serviceTrigger = new NodejsFunction(this, 'service-trigger', {
       environment: {
-        BOT_TOKEN_NAME: botTokenSecret.secretName,
+        SLACK_SECRETS_NAME: slackSecrets.secretName,
         SAMPLE_LAMBDA_NAME: sampleLambdaFunction.functionName,
         SAMPLE_SFN_ARN: sampleStateMachine.stateMachineArn
       },
       bundling: bundlingConfig,
       layers: [layer]
     });
-  
+
     const commandProcessor = new NodejsFunction(this, 'command-processor', {
       environment: {
-        SIGNING_SECRET_NAME: signingSecret.secretName,
-        BOT_TOKEN_NAME: botTokenSecret.secretName,
+        SLACK_SECRETS_NAME: slackSecrets.secretName,
         CHANNEL_ID_NAME: slackChannelParameter.parameterName,
         BOT_USERS_TABLE_NAME: botUsersTable.tableName,
         SERVICE_TRIGGER_NAME: serviceTrigger.functionName
       },
       bundling: bundlingConfig,
       layers: [layer]
-    });
+    })
 
     // Grant Permissions
-    signingSecret.grantRead(commandProcessor);
-    botTokenSecret.grantRead(commandProcessor);
-    botTokenSecret.grantRead(serviceTrigger);
+    slackSecrets.grantRead(commandProcessor);
+    slackSecrets.grantRead(serviceTrigger);
     slackChannelParameter.grantRead(commandProcessor);
     botUsersTable.grantReadData(commandProcessor);
     serviceTrigger.grantInvoke(commandProcessor);
@@ -102,14 +99,15 @@ export class AppStack extends Stack {
     sampleStateMachine.grantRead(serviceTrigger);
 
     // API Gateway
-    const api = new RestApi(this, "slack-bot-api", {
+    const boltApi = new RestApi(this, "bolt-api", {
       restApiName: "Slack Bot Starter Kit API",
       description: "This is the API service Slack Bot Starter Kit."
     });
-    // POST /
-    api.root.addMethod("POST", new LambdaIntegration(commandProcessor, {
-      requestTemplates: { "application/json": '{ "statusCode": "200" }' },
-    }));
+    // POST /slack/events
+    boltApi.root
+      .addResource('slack')
+      .addResource('events')
+      .addMethod("ANY", new LambdaIntegration(commandProcessor, { proxy: true }));
   }
 
   private buildStateMachine() {
