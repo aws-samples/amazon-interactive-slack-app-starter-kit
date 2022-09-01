@@ -20,7 +20,6 @@ import { App, AwsLambdaReceiver, LogLevel, RespondFn, SayFn } from "@slack/bolt"
 const AWS = require('aws-sdk')
 import { buildStatusBlocks, ServiceRequest } from '/opt/nodejs/utils';
 
-AWS.config.update({ region: 'us-east-1' })
 const secretsClient = new AWS.SecretsManager()
 const ssmClient = new AWS.SSM()
 const ddbClient = new AWS.DynamoDB.DocumentClient()

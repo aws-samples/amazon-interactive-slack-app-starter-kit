@@ -1,17 +1,21 @@
 ## Amazon Interactive Slack App Starter Kit
 
-This starter kit will help you started with building an interactive Slack app leveraging CDK.
-
-## TODO
-1. Refactor to use Slack Bolt SDK
-1. Reference future blog post
-1. Include deployment instructions
-1. Cleanup README & enhance description
-1. Edit repository description on GitHub
+This starter kit will help you started with building an interactive Slack app leveraging CDK. More details about why to use the solution in this repository may be found in this [blog post](TODO). Additionally, the linked blog post contains information on how to configure your Slack Application to work with this solution.
 
 ## Architecture
 
 ![Interactive Slack App Architecture](docs/slack_bot_architecture.jpg?raw=true "Architecture")
+
+## Prerequisites
+* AWS CDK (https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html#getting_started_install) version 2.19.0 or later
+* Node (https://nodejs.org/en/download/current/) version 16+
+* Docker-cli (https://docs.docker.com/get-docker/)
+* Git (https://git-scm.com/download)
+
+## Deployment Instructions
+1. Install dependencies using `npm install`
+1. Bootstrap your AWS environment using `cdk bootstrap`
+1. Deploy AWS resources using `cdk deploy`
 
 ## Useful commands
 
@@ -21,6 +25,7 @@ This starter kit will help you started with building an interactive Slack app le
 * `cdk deploy`      deploy this stack to your default AWS account/region
 * `cdk diff`        compare deployed stack with current state
 * `cdk synth`       emits the synthesized CloudFormation template
+* `cdk destroy`     removes all stack resources
 
 ## Security
 
@@ -29,4 +34,3 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more inform
 ## License
 
 This library is licensed under the MIT-0 License. See the LICENSE file.
-
