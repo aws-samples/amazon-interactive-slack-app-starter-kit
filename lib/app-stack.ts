@@ -88,8 +88,16 @@ export class AppStack extends Stack {
       layers: [layer]
     })
 
+    const authProcessor = new NodejsFunction(this, 'auth-processor', {
+      environment: {
+        SLACK_SECRETS_NAME: slackSecrets.secretName
+      },
+      bundling: bundlingConfig,
+      layers: [layer]
+    })
+
     // Grant Permissions
-    slackSecrets.grantRead(commandProcessor);
+    slackSecrets.grantRead(authProcessor);
     slackSecrets.grantRead(serviceTrigger);
     slackChannelParameter.grantRead(commandProcessor);
     botUsersTable.grantReadData(commandProcessor);
