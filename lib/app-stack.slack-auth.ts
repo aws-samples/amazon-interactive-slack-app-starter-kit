@@ -16,36 +16,44 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import { App, AwsLambdaReceiver, LogLevel, RespondFn, SayFn } from "@slack/bolt"
-const AWS = require('aws-sdk')
+import { App, AwsLambdaReceiver, LogLevel } from '@slack/bolt'
+import { SecretsManager } from 'aws-sdk'
 
-const secretsClient = new AWS.SecretsManager()
+const secretsClient = new SecretsManager()
 
 let awsLambdaReceiver: AwsLambdaReceiver | null = null
 let app: App | null = null
+let requestDetails: RequestDetails | null = null
 
 type RequestDetails = {
   channelId: string
   userName: string
-  permittedActions: string[]
   action: string
-  responseUrl?: string
+  actionBase?: string
+  responseUrl: string
   inputValue?: string
 }
 
 exports.handler = async (event: any, context: any, callback: any) => {
+  requestDetails = null
   if (!awsLambdaReceiver) {
     await initBolt()
-    configureApp()
+    configureApp(callback)
   }
   const handler = await awsLambdaReceiver!.start()
-  return handler(event, context, callback)
+  const response = await handler(event, context, callback)
+
+  if (response.statusCode != 200) {
+    throw new Error('Failed to validate slack message')
+  }
+
+  return requestDetails
 }
 
 async function initBolt() {
   // Get the Slack Secrets
-  const secretResult = await secretsClient.getSecretValue({ SecretId: process.env.SLACK_SECRETS_NAME }).promise();
-  const secretObject = JSON.parse(secretResult.SecretString)
+  const secretResult = await secretsClient.getSecretValue({ SecretId: process.env.SLACK_SECRETS_NAME as string }).promise()
+  const secretObject = JSON.parse(secretResult.SecretString!)
 
   awsLambdaReceiver = new AwsLambdaReceiver({
     signingSecret: secretObject.signingSecret
@@ -58,37 +66,37 @@ async function initBolt() {
   })
 }
 
-function configureApp() {
+function configureApp(callback: any) {
   if (!app) {
     throw Error('Bolt app not initialized while trying to configure it')
   }
 
   // @ts-ignore
-  app.use(async ({ context, body, ack, next, respond }) => {
+  app.use(async ({ body, ack, next }) => {
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     await ack!()
 
     // Convert body to a consistent format
-    const requestDetails = parseRequest(body)
+    requestDetails = parseRequest(body)
   })
 }
 
 function parseRequest(body: any): RequestDetails {
-  console.log('body', body)
   if (body.user_id) {
     return {
       channelId: body.channel_id,
       userName: body.user_name,
-      permittedActions: [],
-      action: 'welcome'
+      action: 'welcome',
+      responseUrl: body.response_url
     }
   } else {
     return {
       channelId: body.channel.id,
       userName: body.user.username,
-      permittedActions: [],
       action: body.actions[0].action_id,
-      responseUrl: body.response_url
+      actionBase: body.actions[0].action_id.split('/')[0],
+      responseUrl: body.response_url,
+      inputValue: body.state?.values?.form_input?.input_value?.value ?? null
     }
   }
 }

@@ -16,15 +16,28 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-exports.handler = async function (event: any, context: any) {
-  await new Promise((resolve) => {
-    setTimeout(() => {
-      resolve(true);
-    }, 1000) // Use a small value here to prevent unnecessary charges
-  });
+import { SecretsManager } from 'aws-sdk'
+import * as axios from 'axios'
 
-  return {
-    input: event.input,
-    result: 'some result'
-  };
+const secretsClient = new SecretsManager()
+
+type HttpClientParameters = {
+  url: string,
+  body: any
+}
+
+exports.handler = async function (parameters: HttpClientParameters, context: any) {
+  // Get the Bot Token Secret
+  const secretResult = await secretsClient.getSecretValue({ SecretId: process.env.SLACK_SECRETS_NAME as string }).promise()
+  const secretObject = JSON.parse(secretResult.SecretString as string)
+
+  const headers = { Authorization: `Bearer ${secretObject.botToken}` }
+
+  // Post message in Slack channel
+  const response = await axios.default.post(parameters.url, parameters.body, { headers })
+  if (response.data === 'ok' || response.data.ok) {
+    return response.data
+  }
+
+  throw new Error('Failed to update message in Slack channel')
 }
