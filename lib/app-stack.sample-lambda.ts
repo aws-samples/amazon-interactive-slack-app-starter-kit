@@ -16,30 +16,15 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-export type ServiceRequest = {
-  action: string
-  channelId: string
-  messageTs: string
-  headerBlocks: any[]
-  inputValue: string
-}
+exports.handler = async function (event: any, context: any) {
+  await new Promise((resolve) => {
+    setTimeout(() => {
+      resolve(true)
+    }, 1000) // Use a small value here to prevent unnecessary charges
+  })
 
-export function buildStatusBlocks(status: 'running' | 'success' | 'failed'): any[] {
-  const block = {
-    type: 'section',
-    text: {
-      type: 'mrkdwn',
-      text: ''
-    }
-  };
-
-  if (status === 'running') {
-    block.text.text = '▶️ Execution has started...'
-  } else if (status === 'success') {
-    block.text.text = '✅ Execution was successful!'
-  } else {
-    block.text.text = '⛔️ Execution has failed. Please see details below'
+  return {
+    input: event.input,
+    result: 'some result'
   }
-
-  return [block]
 }
