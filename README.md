@@ -4,7 +4,7 @@ This starter kit will help you started with building an interactive Slack app le
 
 ## Architecture
 
-![Interactive Slack App Architecture](docs/slack_bot_architecture.jpg?raw=true "Architecture")
+![Interactive Slack App Architecture](docs/slack_app_architecture.jpg?raw=true "Architecture")
 
 ## Prerequisites
 * AWS CDK (https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html#getting_started_install) version 2.19.0 or later
