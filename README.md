@@ -1,6 +1,6 @@
 # Amazon Interactive Slack App Starter Kit
 
-This starter kit will help you started with building an interactive Slack app leveraging CDK. More details about why to use the solution in this repository may be found in this [blog post](TODO).
+This starter kit will help you started with building an interactive Slack app leveraging CDK. More details about why to use the solution in this repository may be found in this [blog post](https://aws.amazon.com/blogs/compute/developing-a-serverless-slack-app-using-aws-step-functions-and-aws-lambda/).
 
 This README will guide you to configure this solution with your own AWS account.
 
