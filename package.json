@@ -20,7 +20,7 @@
   "dependencies": {
     "@slack/bolt": "^3.11.3",
     "@types/aws-sdk": "^2.7.0",
-    "aws-cdk-lib": "2.19.0",
+    "aws-cdk-lib": "2.80.0",
     "axios": "^0.26.1",
     "constructs": "^10.0.0",
     "source-map-support": "^0.5.16",
